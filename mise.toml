@@ -1,0 +1,25 @@
+[tasks.format.tools]
+swiftformat = "latest"
+[tasks.format]
+description = "Format Swift source files using SwiftFormat"
+depends_post = ['lint']
+run = 'swiftformat .'
+
+[tasks.lint.tools]
+swiftformat = "latest"
+[tasks.lint]
+description = 'Lint Swift files in the package'
+usage = '''
+flag "--github-actions" help="Render warnings, errors, and results to GitHub"
+'''
+run = """
+if [ '{{flag(name='github-actions')}}' = 'true' ]; then
+    swiftformat --lint . --reporter github-actions-log
+else
+    swiftformat --lint .
+fi
+"""
+
+[tasks.build]
+description = "Build the project"
+run = "xcodebuild -scheme MLXBenchmark"
