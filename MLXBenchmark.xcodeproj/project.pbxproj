@@ -27,6 +27,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		6E4315472EA4142300ED36E0 /* TestFlight */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TestFlight;
+			sourceTree = "<group>";
+		};
 		6ED1D0702EA19ADE00852B15 /* MLXBenchmark */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -53,6 +58,7 @@
 		6ED1D0652EA19ADE00852B15 = {
 			isa = PBXGroup;
 			children = (
+				6E4315472EA4142300ED36E0 /* TestFlight */,
 				6E9F953D2EA24B4C007B9F4A /* mise.toml */,
 				6ED1D0702EA19ADE00852B15 /* MLXBenchmark */,
 				6ED1D09E2EA19D6300852B15 /* Frameworks */,

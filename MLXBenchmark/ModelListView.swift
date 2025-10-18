@@ -15,13 +15,12 @@ struct ModelListView: View {
             ? viewModel.availableModels
             : viewModel.groupedModels[selectedCollection!] ?? []
 
-        if searchText.isEmpty {
-            return models
-        }
-        return models.filter {
+        let filtered = searchText.isEmpty ? models : models.filter {
             $0.name.localizedCaseInsensitiveContains(searchText) ||
                 $0.author.localizedCaseInsensitiveContains(searchText)
         }
+
+        return sortModels(filtered)
     }
 
     var collectionNames: [String] {
@@ -55,6 +54,13 @@ struct ModelListView: View {
                         }
                         .pickerStyle(.menu)
                     }
+
+                    Picker("Sort by", selection: $sortOption) {
+                        ForEach(SortOption.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 } header: {
                     Text("Filter")
                 }
@@ -138,10 +144,28 @@ struct ModelListView: View {
 
     // MARK: Private
 
+    private func sortModels(_ models: [MLXModel]) -> [MLXModel] {
+        models.sorted { lhs, rhs in
+            switch sortOption {
+            case .downloads:
+                if lhs.downloads == rhs.downloads {
+                    return lhs.lastModified > rhs.lastModified
+                }
+                return lhs.downloads > rhs.downloads
+            case .releaseDate:
+                if lhs.lastModified == rhs.lastModified {
+                    return lhs.downloads > rhs.downloads
+                }
+                return lhs.lastModified > rhs.lastModified
+            }
+        }
+    }
+
     @State private var viewModel = ModelViewModel()
     @State private var searchText = ""
     @State private var selectedModelID: String?
     @State private var selectedCollection: String?
+    @State private var sortOption: SortOption = .downloads
 }
 
 // MARK: - ModelRow
@@ -272,4 +296,22 @@ struct DownloadedModelRow: View {
 
 #Preview {
     ModelListView()
+}
+
+// MARK: - SortOption
+
+private enum SortOption: String, CaseIterable, Identifiable {
+    case downloads
+    case releaseDate
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .downloads:
+            return "Most Downloads"
+        case .releaseDate:
+            return "Newest Release"
+        }
+    }
 }

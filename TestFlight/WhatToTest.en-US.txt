@@ -1,3 +1,4 @@
- - Enable game mode
- - Fixed memory usage
- - Improved ttft format
+- Enable game mode
+- Fixed memory usage
+- Improved ttft format
+- Sort by most downloads or release date
