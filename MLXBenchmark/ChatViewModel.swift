@@ -4,6 +4,7 @@ import MLXLLM
 import MLXLMCommon
 import Observation
 import Tokenizers
+import os
 
 @MainActor
 @Observable class ChatViewModel {
@@ -28,12 +29,14 @@ import Tokenizers
     let downloadedModel: DownloadedModel
 
     func sendMessage() {
-        guard !currentMessage.isEmpty else { return }
+        let trimmedMessage = currentMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty else { return }
+        guard !isGenerating else { return }
 
-        let userMessage = ChatMessage(role: .user, content: currentMessage)
+        let userMessage = ChatMessage(role: .user, content: trimmedMessage)
         messages.append(userMessage)
 
-        let prompt = currentMessage
+        let prompt = trimmedMessage
         currentMessage = ""
 
         generationTask = Task {
@@ -45,7 +48,7 @@ import Tokenizers
         generationTask?.cancel()
         generationTask = nil
         isGenerating = false
-        print("🛑 Generation stopped by user")
+        AppLogger.chat.debug("Generation stopped by user")
     }
 
     func clearChat() {
@@ -70,13 +73,20 @@ import Tokenizers
             modelContainer = container
 
             isLoading = false
+            AppLogger.chat.debug("Model prepared for chat: \(self.downloadedModel.model.id, privacy: .public)")
         } catch {
             loadError = "Failed to load model: \(error.localizedDescription)"
             isLoading = false
+            AppLogger.chat.error("Model load failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     private func generateResponse(for prompt: String) async {
+        defer {
+            isGenerating = false
+            generationTask = nil
+        }
+
         guard let modelContainer else {
             let errorMessage = ChatMessage(role: .assistant, content: "Model not loaded")
             messages.append(errorMessage)
@@ -92,7 +102,7 @@ import Tokenizers
             messages.append(assistantMessage)
             let messageIndex = messages.count - 1
 
-            print("🤖 Starting generation for prompt: \(prompt.prefix(50))...")
+            AppLogger.chat.debug("Starting generation for prompt: \(prompt.prefix(50), privacy: .public)...")
 
             // Build chat history for context
             var chatHistory: [Chat.Message] = []
@@ -144,7 +154,7 @@ import Tokenizers
                 for await token in stream {
                     // Check for cancellation
                     if Task.isCancelled {
-                        print("⚠️ Generation cancelled")
+                        AppLogger.chat.debug("Generation stream cancelled")
                         break
                     }
 
@@ -168,7 +178,7 @@ import Tokenizers
                                 await MainActor.run {
                                     self.metrics.timeToFirstToken = ttft
                                 }
-                                print("⏱️ Time to first token: \(String(format: "%.2f", ttft))s")
+                                AppLogger.chat.debug("Time to first token: \(String(format: "%.2f", ttft))s")
                             }
 
                             localGeneratedText += output
@@ -195,7 +205,7 @@ import Tokenizers
 
                     // Stop on completion
                     if isComplete {
-                        print("✅ Generation complete")
+                        AppLogger.chat.debug("Generation stream completed")
                         break
                     }
                 }
@@ -207,12 +217,18 @@ import Tokenizers
             let endTime = Date()
 
             // Update final metrics
-            metrics.promptTokens = promptTokens
-            metrics.completionTokens = completionTokens
-            metrics.totalTime = endTime.timeIntervalSince(startTime)
-            metrics.memoryUsage = getMemoryUsage()
+            self.metrics.promptTokens = promptTokens
+            self.metrics.completionTokens = completionTokens
+            self.metrics.totalTime = endTime.timeIntervalSince(startTime)
+            self.metrics.memoryUsage = getMemoryUsage()
 
-            print("✅ Generation complete: \(completionTokens) tokens in \(String(format: "%.2f", metrics.totalTime))s (\(String(format: "%.1f", metrics.tokensPerSecond)) tok/s)")
+            AppLogger.chat.debug(
+                """
+                Generation finished: \(completionTokens) tokens \
+                in \(String(format: "%.2f", self.metrics.totalTime))s \
+                @ \(String(format: "%.1f", self.metrics.tokensPerSecond)) tok/s
+                """
+            )
 
         } catch {
             let errorMessage = ChatMessage(role: .assistant, content: "Error: \(error.localizedDescription)")
@@ -222,22 +238,35 @@ import Tokenizers
             } else {
                 messages.append(errorMessage)
             }
-            print("❌ Generation error: \(error.localizedDescription)")
+            AppLogger.chat.error("Generation error: \(error.localizedDescription, privacy: .public)")
         }
 
-        isGenerating = false
+        AppLogger.chat.debug("Generation task completed")
     }
 
     private func getMemoryUsage() -> UInt64 {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        var vmInfo = task_vm_info_data_t()
+        var vmInfoCount = mach_msg_type_number_t(MemoryLayout.size(ofValue: vmInfo) / MemoryLayout<natural_t>.size)
 
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        let vmResult = withUnsafeMutablePointer(to: &vmInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(vmInfoCount)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &vmInfoCount)
             }
         }
 
-        return result == KERN_SUCCESS ? info.resident_size : 0
+        if vmResult == KERN_SUCCESS {
+            // phys_footprint tracks compressed + resident memory and aligns with what Xcode reports.
+            return vmInfo.phys_footprint
+        }
+
+        var basicInfo = mach_task_basic_info()
+        var basicCount = mach_msg_type_number_t(MemoryLayout.size(ofValue: basicInfo) / MemoryLayout<natural_t>.size)
+        let basicResult = withUnsafeMutablePointer(to: &basicInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(basicCount)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &basicCount)
+            }
+        }
+
+        return basicResult == KERN_SUCCESS ? UInt64(basicInfo.resident_size) : 0
     }
 }

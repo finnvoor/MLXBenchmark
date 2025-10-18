@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 // MARK: - ModelListView
 
@@ -118,7 +119,7 @@ struct ModelListView: View {
             }
             .task {
                 if viewModel.availableModels.isEmpty {
-                    print("📱 ModelListView: Triggering initial fetch")
+                    AppLogger.models.debug("Triggering initial model fetch from view")
                     await viewModel.fetchAvailableModels()
                 }
             }

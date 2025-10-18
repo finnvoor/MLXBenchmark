@@ -1,5 +1,6 @@
 import Foundation
 import Hub
+import os
 
 // MARK: - CollectionResponse
 
@@ -18,27 +19,40 @@ struct CollectionResponse: Codable {
 // MARK: - HuggingFaceService
 
 @MainActor class HuggingFaceService {
+    // MARK: Lifecycle
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
     // MARK: Internal
 
     static let shared = HuggingFaceService()
 
-    func fetchCollections() async throws -> [HuggingFaceCollection] {
+    func fetchCollections(forceReload: Bool = false) async throws -> [HuggingFaceCollection] {
+        if !forceReload, !cachedCollections.isEmpty {
+            return cachedCollections
+        }
+
         var allCollections: [HuggingFaceCollection] = []
         var offset = 0
-        let limit = 100
 
-        while true {
-            let urlString = "\(baseURL)/collections?owner=\(mlxCommunity)&limit=\(limit)&offset=\(offset)"
-            guard let url = URL(string: urlString) else {
-                throw URLError(.badURL)
-            }
+        repeat {
+            let url = try makeURL(
+                path: "collections",
+                queryItems: [
+                    URLQueryItem(name: "owner", value: mlxCommunity),
+                    URLQueryItem(name: "limit", value: "\(collectionPageSize)"),
+                    URLQueryItem(name: "offset", value: "\(offset)")
+                ]
+            )
 
-            print("📡 Fetching collections from offset \(offset)")
+            AppLogger.network.debug("Fetching collections at offset \(offset)")
 
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let responses = try JSONDecoder().decode([CollectionResponse].self, from: data)
+            let (data, _) = try await session.data(from: url)
+            let responses = try decoder.decode([CollectionResponse].self, from: data)
 
-            if responses.isEmpty {
+            guard !responses.isEmpty else {
                 break
             }
 
@@ -47,107 +61,79 @@ struct CollectionResponse: Codable {
                     slug: response.slug,
                     title: response.title,
                     description: response.description,
-                    modelIds: response.items?.filter { $0.type == "model" }.map(\.id) ?? []
+                    modelIds: response.items?
+                        .filter { $0.type == "model" }
+                        .map(\.id) ?? []
                 )
             }
 
             allCollections.append(contentsOf: collections)
+            offset += collectionPageSize
 
-            print("✅ Fetched \(collections.count) collections (total: \(allCollections.count))")
+            AppLogger.network.debug("Loaded \(collections.count) collections (total: \(allCollections.count))")
+        } while allCollections.count % collectionPageSize == 0
 
-            if responses.count < limit {
-                break
-            }
-
-            offset += limit
-        }
-
+        cachedCollections = allCollections
         return allCollections
     }
 
     func fetchModels(collection: String? = nil) async throws -> [MLXModel] {
         var allModels: [MLXModel] = []
         var seenModelIds = Set<String>()
-        var nextCursor: String? = nil
-        let limit = 500 // Max limit supported by API
-
-        // If filtering by collection, we need to get the collection first
-        var collectionModelIds: Set<String>?
-        if let collectionSlug = collection {
-            let collections = try await fetchCollections()
-            if let targetCollection = collections.first(where: { $0.displayName == collectionSlug }) {
-                collectionModelIds = Set(targetCollection.modelIds)
-            }
-        }
-
-        // Fetch all models with cursor-based pagination
+        var nextCursor: String?
         var pageCount = 0
+
+        let collectionModelIds = try await collectionModelIdentifiers(for: collection)
+
         repeat {
             pageCount += 1
-            var urlString = "\(baseURL)/models?author=\(mlxCommunity)&sort=downloads&direction=-1&limit=\(limit)&full=true"
+            var queryItems = [
+                URLQueryItem(name: "author", value: mlxCommunity),
+                URLQueryItem(name: "sort", value: "downloads"),
+                URLQueryItem(name: "direction", value: "-1"),
+                URLQueryItem(name: "limit", value: "\(modelPageSize)"),
+                URLQueryItem(name: "full", value: "true")
+            ]
 
             if let cursor = nextCursor {
-                urlString += "&cursor=\(cursor)"
+                queryItems.append(URLQueryItem(name: "cursor", value: cursor))
             }
 
-            guard let url = URL(string: urlString) else {
-                throw URLError(.badURL)
-            }
+            let url = try makeURL(path: "models", queryItems: queryItems)
+            AppLogger.network.debug("Fetching models page \(pageCount) (cursor: \(nextCursor != nil ? "yes" : "no"))")
 
-            print("📡 Fetching models page \(pageCount) (cursor: \(nextCursor != nil ? "yes" : "no"))")
-
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await session.data(from: url)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                throw URLError(.badServerResponse)
+                throw APIError.invalidResponse
             }
 
-            print("📊 HTTP Status: \(httpResponse.statusCode)")
+            AppLogger.network.debug("Received status code \(httpResponse.statusCode, privacy: .public)")
 
-            // Extract next cursor from Link header
-            nextCursor = nil
-            if let linkHeader = httpResponse.value(forHTTPHeaderField: "link") {
-                // Parse Link header to extract next cursor
-                // Format: <url?cursor=XXX>; rel="next"
-                if let nextMatch = linkHeader.range(of: "cursor=([^&>]+)", options: .regularExpression) {
-                    let cursorString = String(linkHeader[nextMatch])
-                    if let cursorValue = cursorString.split(separator: "=").last {
-                        nextCursor = String(cursorValue)
-                        print("📄 Found next cursor")
-                    }
-                }
-            }
+            nextCursor = parseNextCursor(from: httpResponse)
 
-            // Try to decode
-            let decoder = JSONDecoder()
             let responses: [HuggingFaceResponse]
-
             do {
                 responses = try decoder.decode([HuggingFaceResponse].self, from: data)
-                print("✅ Successfully decoded \(responses.count) models on page \(pageCount)")
+                AppLogger.network.debug("Decoded \(responses.count) models on page \(pageCount)")
             } catch {
-                print("❌ Decoding error: \(error)")
-                if let jsonString = String(data: data.prefix(500), encoding: .utf8) {
-                    print("📄 Response preview: \(jsonString)")
-                }
+                AppLogger.network.error("Failed decoding models: \(error.localizedDescription, privacy: .public)")
                 throw error
             }
 
-            if responses.isEmpty {
+            guard !responses.isEmpty else {
                 break
             }
 
             let models = responses.compactMap { response -> MLXModel? in
-                let dateFormatter = ISO8601DateFormatter()
-                dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                guard let date = dateFormatter.date(from: response.lastModified) else {
+                let modelId = response.modelId ?? response.id
+
+                guard !seenModelIds.contains(modelId) else {
                     return nil
                 }
 
-                let modelId = response.modelId ?? response.id
-
-                // Skip if we've already seen this model
-                guard !seenModelIds.contains(modelId) else {
+                guard let lastModified = isoDateFormatter.date(from: response.lastModified) else {
+                    AppLogger.network.error("Invalid date for model \(modelId, privacy: .public)")
                     return nil
                 }
 
@@ -159,39 +145,106 @@ struct CollectionResponse: Codable {
                     author: response.author,
                     downloads: response.downloads,
                     likes: response.likes,
-                    lastModified: date,
+                    lastModified: lastModified,
                     size: nil,
                     collections: nil,
                     tags: response.tags
                 )
             }
 
-            // Filter to only text generation models
-            let textGenModels = models.filter(\.isTextGeneration)
+            let textGenerationModels = models.filter(\.isTextGeneration)
+            allModels.append(contentsOf: textGenerationModels)
 
-            allModels.append(contentsOf: textGenModels)
+            AppLogger.network.debug("Accumulated \(allModels.count) text generation models so far")
 
-            print("✅ Total unique models: \(allModels.count) (filtered \(models.count - textGenModels.count) non-text-gen models)")
+        } while nextCursor != nil && pageCount < maxModelPages
 
-            // Safety limit
-            if pageCount >= 10 {
-                print("⚠️ Reached page limit")
-                break
-            }
+        if pageCount >= maxModelPages, nextCursor != nil {
+            AppLogger.network.error("Hit page limit while fetching models")
+        }
 
-        } while nextCursor != nil
-
-        // Filter by collection if needed
-        if let modelIds = collectionModelIds {
+        if let modelIds = collectionModelIds, !modelIds.isEmpty {
             allModels = allModels.filter { modelIds.contains($0.id) }
         }
 
-        print("✅ Returning \(allModels.count) models")
+        AppLogger.network.debug("Returning \(allModels.count) models")
         return allModels
     }
 
     // MARK: Private
 
-    private let baseURL = "https://huggingface.co/api"
+    private enum APIError: Error {
+        case invalidURL
+        case invalidResponse
+    }
+
+    private let session: URLSession
+    private let baseURL = URL(string: "https://huggingface.co/api")!
     private let mlxCommunity = "mlx-community"
+    private let decoder = JSONDecoder()
+    private let isoDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private let collectionPageSize = 100
+    private let modelPageSize = 500
+    private let maxModelPages = 10
+
+    private var cachedCollections: [HuggingFaceCollection] = []
+
+    private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        components?.queryItems = queryItems
+        guard let url = components?.url else {
+            throw APIError.invalidURL
+        }
+        return url
+    }
+
+    private func parseNextCursor(from response: HTTPURLResponse) -> String? {
+        guard let linkHeader = response.value(forHTTPHeaderField: "link") else {
+            return nil
+        }
+
+        return linkHeader
+            .components(separatedBy: ",")
+            .compactMap { component -> String? in
+                let parts = component.components(separatedBy: ";")
+                guard
+                    let urlPart = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    let relPart = parts.dropFirst().first(where: { $0.contains("rel=\"next\"") }),
+                    relPart.contains("rel=\"next\"")
+                else {
+                    return nil
+                }
+
+                guard let urlStart = urlPart.firstIndex(of: "<"),
+                      let urlEnd = urlPart.firstIndex(of: ">") else {
+                    return nil
+                }
+
+                let urlString = urlPart[urlStart...urlEnd].trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+
+                guard let components = URLComponents(string: String(urlString)) else {
+                    return nil
+                }
+
+                return components.queryItems?.first(where: { $0.name == "cursor" })?.value
+            }
+            .first
+    }
+
+    private func collectionModelIdentifiers(for name: String?) async throws -> Set<String>? {
+        guard let name else { return nil }
+
+        let collections = try await fetchCollections()
+        guard let collection = collections.first(where: { $0.displayName == name || $0.slug == name }) else {
+            AppLogger.network.error("No collection found for \(name, privacy: .public)")
+            return nil
+        }
+
+        return Set(collection.modelIds)
+    }
 }

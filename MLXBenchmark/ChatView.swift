@@ -86,7 +86,7 @@ struct ChatView: View {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.title2)
                         }
-                        .disabled(viewModel.currentMessage.isEmpty)
+                        .disabled(viewModel.currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .keyboardShortcut(.return, modifiers: .command)
                     }
                 }

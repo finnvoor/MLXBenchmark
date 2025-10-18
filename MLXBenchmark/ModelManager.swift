@@ -2,16 +2,20 @@ import Foundation
 import Hub
 import MLXLLM
 import MLXLMCommon
-import Tokenizers
+import os
 
 @MainActor class ModelManager: @unchecked Sendable {
     // MARK: Lifecycle
 
-    init() {
-        // Use documents directory for model storage
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let modelsPath = documents.appendingPathComponent("huggingface")
-        hub = HubApi(downloadBase: modelsPath)
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+
+        modelsDirectory = documentsDirectory.appendingPathComponent("huggingface")
+        try? fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+        hub = HubApi(downloadBase: modelsDirectory)
     }
 
     // MARK: Internal
@@ -24,9 +28,8 @@ import Tokenizers
     ) async throws -> URL {
         let repo = Hub.Repo(id: model.id)
 
-        print("🔽 Starting download for \(model.id)")
+        AppLogger.models.debug("Starting download for \(model.id, privacy: .public)")
 
-        // Download model using Hub
         let modelPath = try await hub.snapshot(
             from: repo,
             matching: ["*.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json", "*.model"]
@@ -34,36 +37,34 @@ import Tokenizers
             progressHandler(progress)
         }
 
-        print("✅ Download complete for \(model.id) at \(modelPath.path)")
+        AppLogger.models.debug("Download finished for \(model.id, privacy: .public) at \(modelPath.path, privacy: .public)")
 
         return modelPath
     }
 
     func loadModel(modelId: String, from path: URL) async throws -> ModelContainer {
-        // Use LLMModelFactory to load the model
         let modelFactory = LLMModelFactory.shared
 
-        print("🔧 Loading model: \(modelId) from \(path.path)")
+        AppLogger.models.debug("Loading model \(modelId, privacy: .public) from \(path.path, privacy: .public)")
 
-        // Create a ModelConfiguration with the actual model ID
         let modelConfig = ModelConfiguration(id: modelId)
-
-        // Load the model container
         let container = try await modelFactory.loadContainer(
             hub: hub,
             configuration: modelConfig
         )
 
-        print("✅ Model loaded successfully: \(modelId)")
+        AppLogger.models.debug("Model loaded successfully: \(modelId, privacy: .public)")
 
         return container
     }
 
     func deleteModel(at path: URL) throws {
-        try FileManager.default.removeItem(at: path)
+        try fileManager.removeItem(at: path)
     }
 
     // MARK: Private
 
+    private let fileManager: FileManager
+    private let modelsDirectory: URL
     private let hub: HubApi
 }

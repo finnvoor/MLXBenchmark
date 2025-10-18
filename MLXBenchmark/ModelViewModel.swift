@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable class ModelViewModel {
@@ -39,9 +40,9 @@ import Observation
     func fetchCollections() async {
         do {
             collections = try await service.fetchCollections()
-            print("✅ Loaded \(collections.count) collections")
+            AppLogger.models.debug("Loaded \(self.collections.count) collections")
         } catch {
-            print("❌ Failed to load collections: \(error.localizedDescription)")
+            AppLogger.models.error("Failed to load collections: \(error.localizedDescription, privacy: .public)")
             self.error = error.localizedDescription
         }
     }
@@ -51,7 +52,7 @@ import Observation
         error = nil
         selectedCollection = collection
 
-        print("🔍 ModelViewModel: Starting to fetch models...")
+        AppLogger.models.debug("Fetching available models for collection \(collection ?? "All", privacy: .public)")
 
         // Load collections first if not loaded
         if collections.isEmpty {
@@ -60,9 +61,9 @@ import Observation
 
         do {
             availableModels = try await service.fetchModels(collection: collection)
-            print("✅ ModelViewModel: Loaded \(availableModels.count) models")
+            AppLogger.models.debug("Loaded \(self.availableModels.count) models")
         } catch {
-            print("❌ ModelViewModel: Error - \(error.localizedDescription)")
+            AppLogger.models.error("Error fetching models: \(error.localizedDescription, privacy: .public)")
             self.error = error.localizedDescription
         }
 
@@ -70,6 +71,20 @@ import Observation
     }
 
     func downloadModel(_ model: MLXModel) {
+        if let existing = downloadedModels.first(where: { $0.id == model.id }) {
+            switch existing.status {
+            case .installed, .downloading:
+                AppLogger.models.debug("Ignoring download request for \(model.id, privacy: .public) – already handled")
+                return
+            case .error:
+                existing.status = .downloading(progress: 0)
+                startDownloadTask(for: existing)
+                return
+            default:
+                break
+            }
+        }
+
         let downloadedModel = DownloadedModel(
             id: model.id,
             model: model,
@@ -78,41 +93,7 @@ import Observation
         )
         downloadedModels.append(downloadedModel)
 
-        let task = Task {
-            do {
-                print("📥 Starting download task for \(model.id)")
-
-                let path = try await modelManager.downloadModel(model) { progress in
-                    Task { @MainActor in
-                        let fractionCompleted = progress.fractionCompleted
-                        if fractionCompleted == 1.0 {
-                            print("📊 Download progress for \(model.id): 100% (complete)")
-                        } else if Int(fractionCompleted * 100) % 10 == 0 {
-                            print("📊 Download progress for \(model.id): \(Int(fractionCompleted * 100))%")
-                        }
-                        downloadedModel.status = .downloading(progress: fractionCompleted)
-                    }
-                }
-
-                // Ensure final progress update is processed
-                try? await Task.sleep(for: .milliseconds(100))
-
-                print("✅ Download completed, updating status for \(model.id)")
-                downloadedModel.status = .installed
-                downloadedModel.localPath = path
-
-            } catch is CancellationError {
-                print("🚫 Download cancelled for \(model.id)")
-                downloadedModels.removeAll { $0.id == model.id }
-            } catch {
-                print("❌ Download error for \(model.id): \(error.localizedDescription)")
-                downloadedModel.status = .error(error.localizedDescription)
-            }
-
-            downloadTasks.removeValue(forKey: model.id)
-        }
-
-        downloadTasks[model.id] = task
+        startDownloadTask(for: downloadedModel)
     }
 
     func cancelDownload(_ model: DownloadedModel) {
@@ -147,15 +128,17 @@ import Observation
     private var modelToCollections: [String: [String]] = [:]
 
     private func loadDownloadedModels() async {
-        print("📂 Scanning filesystem for downloaded models")
+        AppLogger.models.debug("Scanning filesystem for downloaded models")
 
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let modelsPath = documents.appendingPathComponent("huggingface/models")
 
         guard FileManager.default.fileExists(atPath: modelsPath.path) else {
-            print("⚠️ Models directory doesn't exist yet: \(modelsPath.path)")
+            AppLogger.models.debug("Models directory doesn't exist yet: \(modelsPath.path, privacy: .public)")
             return
         }
+
+        downloadedModels.removeAll()
 
         do {
             // Get all organization directories (e.g., "mlx-community")
@@ -167,7 +150,7 @@ import Observation
                 (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
 
-            print("📦 Found \(orgDirs.count) organization directories")
+            AppLogger.models.debug("Found \(orgDirs.count) organization directories")
 
             for orgDir in orgDirs {
                 let orgName = orgDir.lastPathComponent
@@ -188,11 +171,11 @@ import Observation
                     // Check if this directory contains model files (config.json is a good indicator)
                     let configPath = modelDir.appendingPathComponent("config.json")
                     guard FileManager.default.fileExists(atPath: configPath.path) else {
-                        print("⚠️ Skipping \(modelId) - no config.json found")
+                        AppLogger.models.debug("Skipping \(modelId, privacy: .public) – missing config.json")
                         continue
                     }
 
-                    print("✅ Found installed model: \(modelId)")
+                    AppLogger.models.debug("Found installed model: \(modelId, privacy: .public)")
 
                     // Create a model object for the downloaded model
                     let model = MLXModel(
@@ -214,14 +197,14 @@ import Observation
                         status: .installed
                     )
 
-                    downloadedModels.append(downloadedModel)
+                    self.downloadedModels.append(downloadedModel)
                 }
             }
 
-            print("✅ Loaded \(downloadedModels.count) downloaded models from filesystem")
+            AppLogger.models.debug("Loaded \(self.downloadedModels.count) downloaded models from filesystem")
 
         } catch {
-            print("❌ Error scanning models directory: \(error)")
+            AppLogger.models.error("Error scanning models directory: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -244,5 +227,44 @@ import Observation
         }
 
         return totalSize
+    }
+
+    private func startDownloadTask(for downloadedModel: DownloadedModel) {
+        let model = downloadedModel.model
+
+        AppLogger.models.debug("Starting download task for \(model.id, privacy: .public)")
+
+        let task = Task {
+            do {
+                let path = try await modelManager.downloadModel(model) { progress in
+                    Task { @MainActor in
+                        downloadedModel.status = .downloading(progress: progress.fractionCompleted)
+                    }
+                }
+
+                try? await Task.sleep(for: .milliseconds(100))
+
+                await MainActor.run {
+                    downloadedModel.status = .installed
+                    downloadedModel.localPath = path
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    AppLogger.models.debug("Download cancelled for \(model.id, privacy: .public)")
+                    self.downloadedModels.removeAll { $0.id == model.id }
+                }
+            } catch {
+                await MainActor.run {
+                    AppLogger.models.error("Download failed for \(model.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    downloadedModel.status = .error(error.localizedDescription)
+                }
+            }
+
+            await MainActor.run {
+                self.downloadTasks.removeValue(forKey: model.id)
+            }
+        }
+
+        downloadTasks[model.id] = task
     }
 }
