@@ -171,7 +171,11 @@ struct MetricsView: View {
 
                 MetricCard(
                     title: "TTFT",
-                    value: Text(Duration.milliseconds(metrics.timeToFirstToken * 1000).formatted(.units(allowed: [.seconds, .milliseconds]))),
+                    value: Text(
+                        metrics.timeToFirstToken >= 1.0
+                            ? String(format: "%.1fs", metrics.timeToFirstToken)
+                            : String(format: "%dms", Int(metrics.timeToFirstToken * 1000))
+                    ),
                     icon: "timer"
                 )
             }
