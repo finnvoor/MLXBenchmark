@@ -178,6 +178,10 @@ struct ModelRow: View {
         viewModel.getStatus(for: model)
     }
 
+    var downloadedModel: DownloadedModel? {
+        viewModel.downloadedModels.first { $0.id == model.id }
+    }
+
     var modelCollections: [String] {
         viewModel.collections.filter { $0.modelIds.contains(model.id) }.map(\.displayName)
     }
@@ -217,8 +221,13 @@ struct ModelRow: View {
                 }
 
             case .installed:
-                Label("Installed", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                if let sizeDescription = downloadedModel?.sizeString {
+                    Label("Installed (\(sizeDescription))", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Installed", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
 
             case let .error(message):
                 Label("Error", systemImage: "exclamationmark.triangle")
@@ -247,6 +256,12 @@ struct DownloadedModelRow: View {
                 Text(model.model.author)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                if model.status == .installed {
+                    Text(model.sizeString)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()

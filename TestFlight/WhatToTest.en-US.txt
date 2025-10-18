@@ -2,3 +2,4 @@
 - Fixed memory usage
 - Improved ttft format
 - Sort by most downloads or release date
+- Show size of installed models

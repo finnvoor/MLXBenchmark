@@ -1,0 +1,7 @@
+[submodule "submodules/mlx"]
+	path = Source/Cmlx/mlx
+    url = https://github.com/sstame20/mlx
+	branch = mpp-kernels
+[submodule "submodules/mlx-c"]
+	path = Source/Cmlx/mlx-c
+	url = https://github.com/finnvoor/mlx-c

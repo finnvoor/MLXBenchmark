@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		6ED1D0A02EA19D6300852B15 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 6ED1D09F2EA19D6300852B15 /* MLXLLM */; };
-		6ED1D0A22EA19D6300852B15 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 6ED1D0A12EA19D6300852B15 /* MLXLMCommon */; };
+		6EE565A12EB27EE500A37591 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE565A02EB27EE500A37591 /* MLXLLM */; };
+		6EE565A32EB27EE500A37591 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE565A22EB27EE500A37591 /* MLXLMCommon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,8 +47,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6ED1D0A22EA19D6300852B15 /* MLXLMCommon in Frameworks */,
-				6ED1D0A02EA19D6300852B15 /* MLXLLM in Frameworks */,
+				6EE565A32EB27EE500A37591 /* MLXLMCommon in Frameworks */,
+				6EE565A12EB27EE500A37591 /* MLXLLM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -101,8 +101,8 @@
 			);
 			name = MLXBenchmark;
 			packageProductDependencies = (
-				6ED1D09F2EA19D6300852B15 /* MLXLLM */,
-				6ED1D0A12EA19D6300852B15 /* MLXLMCommon */,
+				6EE565A02EB27EE500A37591 /* MLXLLM */,
+				6EE565A22EB27EE500A37591 /* MLXLMCommon */,
 			);
 			productName = MLXBenchmark;
 			productReference = 6ED1D06E2EA19ADE00852B15 /* MLXBenchmark.app */;
@@ -133,7 +133,7 @@
 			mainGroup = 6ED1D0652EA19ADE00852B15;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6ED1D08B2EA19D1300852B15 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				6EE5659F2EB27EE500A37591 /* XCLocalSwiftPackageReference "mlx-swift-examples" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6ED1D06F2EA19ADE00852B15 /* Products */;
@@ -380,26 +380,20 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		6ED1D08B2EA19D1300852B15 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "git@github.com:ml-explore/mlx-swift-examples.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.29.1;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		6EE5659F2EB27EE500A37591 /* XCLocalSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "mlx-swift-examples";
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		6ED1D09F2EA19D6300852B15 /* MLXLLM */ = {
+		6EE565A02EB27EE500A37591 /* MLXLLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6ED1D08B2EA19D1300852B15 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
 			productName = MLXLLM;
 		};
-		6ED1D0A12EA19D6300852B15 /* MLXLMCommon */ = {
+		6EE565A22EB27EE500A37591 /* MLXLMCommon */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6ED1D08B2EA19D1300852B15 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
 			productName = MLXLMCommon;
 		};
 /* End XCSwiftPackageProductDependency section */

@@ -177,6 +177,9 @@ import os
 
                     AppLogger.models.debug("Found installed model: \(modelId, privacy: .public)")
 
+                    // Calculate the total on-disk size for this model
+                    let totalSize = calculateDirectorySize(modelDir)
+
                     // Create a model object for the downloaded model
                     let model = MLXModel(
                         id: modelId,
@@ -185,7 +188,7 @@ import os
                         downloads: 0,
                         likes: 0,
                         lastModified: Date(),
-                        size: calculateDirectorySize(modelDir),
+                        size: totalSize,
                         collections: nil,
                         tags: nil
                     )
@@ -194,7 +197,8 @@ import os
                         id: modelId,
                         model: model,
                         localPath: modelDir,
-                        status: .installed
+                        status: .installed,
+                        totalSize: totalSize
                     )
 
                     self.downloadedModels.append(downloadedModel)
@@ -208,7 +212,7 @@ import os
         }
     }
 
-    private func calculateDirectorySize(_ url: URL) -> Int64? {
+    nonisolated private func calculateDirectorySize(_ url: URL) -> Int64? {
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.fileSizeKey],
@@ -244,9 +248,12 @@ import os
 
                 try? await Task.sleep(for: .milliseconds(100))
 
+                let totalSize = self.calculateDirectorySize(path)
+
                 await MainActor.run {
                     downloadedModel.status = .installed
                     downloadedModel.localPath = path
+                    downloadedModel.totalSize = totalSize
                 }
             } catch is CancellationError {
                 await MainActor.run {

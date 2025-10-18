@@ -104,11 +104,18 @@ enum ModelStatus: Equatable {
 @Observable class DownloadedModel: Identifiable, Hashable {
     // MARK: Lifecycle
 
-    init(id: String, model: MLXModel, localPath: URL, status: ModelStatus = .installed) {
+    init(
+        id: String,
+        model: MLXModel,
+        localPath: URL,
+        status: ModelStatus = .installed,
+        totalSize: Int64? = nil
+    ) {
         self.id = id
         self.model = model
         self.localPath = localPath
         self.status = status
+        self.totalSize = totalSize
     }
 
     // MARK: Internal
@@ -117,6 +124,20 @@ enum ModelStatus: Equatable {
     let model: MLXModel
     var localPath: URL
     var status: ModelStatus
+    var totalSize: Int64?
+
+    var sizeString: String {
+        guard let totalSize else { return "Unknown" }
+        return Self.sizeFormatter.string(fromByteCount: totalSize)
+    }
+
+    // MARK: Private
+
+    private static let sizeFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
 
     static func == (lhs: DownloadedModel, rhs: DownloadedModel) -> Bool {
         lhs.id == rhs.id
